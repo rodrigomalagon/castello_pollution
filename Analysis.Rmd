@@ -1,0 +1,202 @@
+---
+title: "Analysis"
+author: "Rodrigo Malagón"
+date: "2024-08-29"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Pollution concentration modelling in Castellón de la Plana for 2023 using LSTM
+
+
+This project aims to adapt the LSTM framework to the modellinf of pollutants in the city of Castellón de la Plana, which 
+
+```{r}
+#install.packages("keras3")
+library(keras3) 
+```
+
+#Data processing
+
+Retrieve datasets
+
+```{r}
+# Retrieve pollution datasets
+data_path <- './data/raw_data/'
+file_names <- list.files(data_path, full.names = FALSE, pattern = "MDEST*") #one file per station
+```
+
+```{r}
+# Retrieve sattions metadata file
+stations <- read.csv(paste0(data_path,'stations.csv'))
+stations
+```
+
+
+Review length of datasets per station to have an initial idea of missing data across stations.
+
+```{r}
+station_id <- list()
+len <- list()
+for(file in file_names){
+  df <- read.csv(paste0(data_path,file),skip = 3,sep ="\t",header=FALSE)
+  station_id <- c(station_id,substr(file,6,13))
+  len <- c(len,dim(df)[1]-2)
+  #print(paste0('Number of rows for station with id ',station_id,': ',dim(df)[1]-2))
+}
+station_id |> unlist() -> station_id
+len |> unlist() -> len
+df <- data.frame('station_id' = station_id,'number_of_days' = len)
+df <- merge(df,stations,by = 'station_id')
+df
+#df[df$number_of_days==365,]
+```
+
+Create list with all pollution dataframes per station
+
+
+```{r}
+pollution_data <- list()
+for(file in file_names){
+  id <- substr(file,6,13)
+  df <- read.csv(paste0(data_path,file),skip = 3,sep ="\t",header=FALSE)
+  colnames(df)<-df[1,]
+  df <- df[3:dim(df)[1],]
+  df$station_id <- id
+  pollution_data[[id]] <- df
+}
+pollution_data
+```
+
+
+
+
+Detecting pollutant with greater representation across stations
+
+```{r}
+pollutants <- c('PM10','PM2.5','NOx','NO2','SO2')
+num_stations <- list()
+for(pol in pollutants){
+  num <- lapply(pollution_data, function(x){pol %in%  colnames(x)}) |> unlist() |> sum()  
+  num_stations <- c(num_stations,num)
+}
+num_stations|> unlist()-> num_stations
+data.frame(pollutants,num_stations)
+```
+
+
+Selecting a dataset to work individually and inspecting missing values
+
+```{r}
+id <- '12040010'
+pol <- pollution_data[[id]]
+
+
+# Change datatype to numeric
+pol$PM2.5 |> as.numeric() -> pol$PM2.5
+pol$H.Rel. |> as.integer() -> pol$H.Rel.
+pol$R.Sol. |> as.integer() -> pol$R.Sol.
+pol$Veloc. |> lapply(function(x){
+  gsub(x,pattern = ',',replacement = '.')
+
+}) |> unlist() |> as.numeric() -> pol$Veloc.
+pol$Temp. |> lapply(function(x){
+  gsub(x,pattern = ',',replacement = '.')
+
+}) |> unlist() |> as.numeric() -> pol$Temp.
+
+pol
+```
+Filling missing values
+
+```{r}
+
+mean_replace <- function(arg){
+  l <- arg
+  l[!is.na(l)]|> mean() |> round(2) -> m
+  j <- 0
+  for(i in 1:length(l)){
+    if(is.na(l[[i]])){
+      j <- j+1
+      l[[i]] <- m
+    }
+  }
+  print(paste0('Percentage of missing repalced: ',round(j/length(l),2),'%'))
+  return(l)
+}
+
+
+mean_replace(pol$PM2.5) -> pol$PM2.5
+mean_replace(pol$Temp.) -> pol$Temp.
+mean_replace(pol$R.Sol.) -> pol$R.Sol.
+mean_replace(pol$H.Rel.) -> pol$H.Rel.
+mean_replace(pol$Veloc.) -> pol$Veloc.
+```
+
+Preparing dataset for LSTM
+
+```{r}
+# Prepare the data for LSTM (create lagged dataset)
+lag <- round(dim(pol)[1]/2)
+data <- pol$PM2.5
+
+X <- array(data[1:(length(data) - lag)], dim = c(length(data) - lag, lag, 1))
+y <- data[(lag + 1):length(data)]
+len <- dim(X)[1]
+
+# Split into training and test sets
+train_size <- round(len * 0.5)
+X_train <- X[1:train_size,,]
+y_train <- y[1:train_size]
+X_test <- X[(train_size + 1):len,,]
+y_test <- y[(train_size + 1):len]
+```
+
+
+
+#Data modelling
+
+
+```{r}
+model <- keras_model_sequential() %>%
+  layer_lstm(units = lag, input_shape = c(lag, 1)) %>%
+  layer_dense(units = 1)
+
+model %>% compile(
+  loss = 'mean_squared_error',
+  optimizer = 'adam'
+)
+
+summary(model)
+```
+
+## Train model
+
+```{r}
+history <- model %>% fit(
+  x = X_train, 
+  y = y_train,
+  epochs = 10,
+  batch_size = 1,
+  validation_data = list(X_test, y_test),
+  verbose = 2
+)
+```
+
+## Predict 
+
+```{r}
+predictions <- model %>% predict(X_test)
+
+
+# Plot the results
+plot((train_size + lag + 1):365, y_test, type = 'l', col = 'blue', lwd = 2,
+     main = "Actual vs Predicted", xlab = "Time", ylab = "Value")
+lines((train_size + lag + 1):365, predictions, col = 'red', lwd = 2)
+legend("topright", legend = c("Actual", "Predicted"), col = c("blue", "red"), lty = 1, lwd = 2)
+
+```
+
