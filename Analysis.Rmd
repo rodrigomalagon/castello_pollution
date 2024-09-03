@@ -144,25 +144,27 @@ data <- pol$PM2.5
 
 
 # Apply lag to dataset to obtain array of input equences
-X <- array(0, dim = c(length(data) - lag, lag, 1))
+X <- array(NA, dim = c(length(data) - lag, lag, 1))
 len <- dim(X)[1]
+y <- array(NA, dim = c(len, 1))
 for(i in 1:len){
-lag_selection <- i:(lag+i-1)
- X[i,,] <- data[lag_selection]
+  lag_selection <- i:(lag+i-1)
+  X[i,,] <- data[lag_selection]
+  y[i,]<- data[i+lag]
 }
 
-X[1,,]
 
-y <- data[(lag + 1):length(data)]
+
+
 
 
 # Split into training and test sets
 train_size <- round(len * 0.8)
 X_train <- X[1:train_size,,]
-y_train <- y[1:train_size]
+y_train <- y[1:train_size,]
 
 X_test <- X[(train_size + 1):len,,]
-y_test <- y[(train_size + 1):len]
+y_test <- y[(train_size + 1):len,]
 ```
 
 
@@ -199,13 +201,16 @@ legend("topright", legend = c("X[*,,]",'y','y[*]'), col = c("black", "gray",'red
 ```{r}
 model <- 0
 model <- keras_model_sequential() %>%
-  layer_lstm(units = lag, input_shape = c(lag, 1)) %>%
+  layer_lstm(units = lag, activation = 'relu', input_shape = c(lag, 1)) %>%
   layer_dense(units = 1)
 
+#Set parameters
 model %>% compile(
   loss = 'mean_squared_error',
-  optimizer = 'adam'
+  optimizer = optimizer_adam(learning_rate = 1e-3),
+  metrics = c('mae')
 )
+
 
 summary(model)
 ```
@@ -227,7 +232,6 @@ history <- model %>% fit(
 
 ```{r}
 predictions <- model %>% predict(X_test)
-
 
 # Plot the results
 
