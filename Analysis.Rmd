@@ -52,7 +52,6 @@ len |> unlist() -> len
 df <- data.frame('station_id' = station_id,'number_of_days' = len)
 df <- merge(df,stations,by = 'station_id')
 df
-#df[df$number_of_days==365,]
 ```
 
 Create list with all pollution dataframes per station
@@ -88,7 +87,7 @@ data.frame(pollutants,num_stations)
 ```
 
 
-Selecting a dataset to work individually and inspecting missing values
+Selecting a station dataset to work individually and inspect missing values
 
 ```{r}
 id <- '12040010'
@@ -113,7 +112,7 @@ pol
 Filling missing values
 
 ```{r}
-
+# Function to replace missing values with mean of remaining values
 mean_replace <- function(arg){
   l <- arg
   l[!is.na(l)]|> mean() |> round(2) -> m
@@ -124,7 +123,7 @@ mean_replace <- function(arg){
       l[[i]] <- m
     }
   }
-  print(paste0('Percentage of missing repalced: ',round(j/length(l),2),'%'))
+  print(paste0('Percentage of missing replaced: ',round(j/length(l),2),'%'))
   return(l)
 }
 
@@ -140,19 +139,56 @@ Preparing dataset for LSTM
 
 ```{r}
 # Prepare the data for LSTM (create lagged dataset)
-lag <- round(dim(pol)[1]/2)
+lag <- 30#round(dim(pol)[1]/2)
 data <- pol$PM2.5
 
-X <- array(data[1:(length(data) - lag)], dim = c(length(data) - lag, lag, 1))
-y <- data[(lag + 1):length(data)]
+
+# Apply lag to dataset to obtain array of input equences
+X <- array(0, dim = c(length(data) - lag, lag, 1))
 len <- dim(X)[1]
+for(i in 1:len){
+lag_selection <- i:(lag+i-1)
+ X[i,,] <- data[lag_selection]
+}
+
+X[1,,]
+
+y <- data[(lag + 1):length(data)]
+
 
 # Split into training and test sets
-train_size <- round(len * 0.5)
+train_size <- round(len * 0.8)
 X_train <- X[1:train_size,,]
 y_train <- y[1:train_size]
+
 X_test <- X[(train_size + 1):len,,]
 y_test <- y[(train_size + 1):len]
+```
+
+
+A little of visualization of our datasets
+```{r}
+plot((1+lag):(len+lag),y,
+      col = 'grey',
+        type='l',
+      lty=5,
+        xlab = 'Day of the year',
+        ylab = 'Concentration of PM2.5',
+        xlim = c(1,365),
+      lwd =1
+     )
+for(id in c(1, 100)){
+  lines(id:(lag+id-1),X[id,,],
+      col = 'black',lwd = 1)
+points((id+lag),y[id],
+       col = 'red',
+       lwd = 2)
+}
+
+
+
+# Legend
+legend("topright", legend = c("X[*,,]",'y','y[*]'), col = c("black", "gray",'red'), lty = 1, lwd = 2)
 ```
 
 
@@ -161,6 +197,7 @@ y_test <- y[(train_size + 1):len]
 
 
 ```{r}
+model <- 0
 model <- keras_model_sequential() %>%
   layer_lstm(units = lag, input_shape = c(lag, 1)) %>%
   layer_dense(units = 1)
@@ -193,10 +230,14 @@ predictions <- model %>% predict(X_test)
 
 
 # Plot the results
-plot((train_size + lag + 1):365, y_test, type = 'l', col = 'blue', lwd = 2,
-     main = "Actual vs Predicted", xlab = "Time", ylab = "Value")
-lines((train_size + lag + 1):365, predictions, col = 'red', lwd = 2)
-legend("topright", legend = c("Actual", "Predicted"), col = c("blue", "red"), lty = 1, lwd = 2)
 
+title = paste0("Actual vs Predicted for fixed window of ",lag,' days')
+
+plot((train_size + lag + 1):365, y_test, type = 'l', col = 'blue', lwd = 2,
+     main = title, xlab = "Day of the year", ylab = "PM2.5 concentration")
+lines((train_size + lag + 1):365, predictions, col = 'red', lwd = 2)
+
+
+legend("topright", legend = c("Actual", "Predicted"), col = c("blue", "red"), lty = 1, lwd = 2)
 ```
 
