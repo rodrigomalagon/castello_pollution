@@ -112,6 +112,16 @@ pol
 Filling missing values
 
 ```{r}
+plot(1:365,pol$PM2.5,
+     type = 'l',
+     col = 'blue',
+     main = 'Plot with possible missing values'
+     )
+```
+
+
+
+```{r}
 # Function to replace missing values with mean of remaining values
 mean_replace <- function(arg){
   l <- arg
@@ -123,7 +133,7 @@ mean_replace <- function(arg){
       l[[i]] <- m
     }
   }
-  print(paste0('Percentage of missing replaced: ',round(j/length(l),2),'%'))
+  print(paste0('Percentage of missing values replaced with mean values for series: ',round(j/length(l),2),'%'))
   return(l)
 }
 
@@ -135,27 +145,63 @@ mean_replace(pol$H.Rel.) -> pol$H.Rel.
 mean_replace(pol$Veloc.) -> pol$Veloc.
 ```
 
+
+Plot time series with replaced values
+
+```{r}
+plot(1:365,pol$PM2.5,
+     type = 'l',
+     col = 'blue'
+     )
+```
+
+
 Preparing dataset for LSTM
 
 ```{r}
-# Prepare the data for LSTM (create lagged dataset)
-lag <- 30#round(dim(pol)[1]/2)
-data <- pol$PM2.5
+# Data selection
+cols_selected <- c('PM2.5','Temp.','R.Sol.','H.Rel.','Veloc.')
+data <- pol[cols_selected] |> data.matrix() |> unname()
+ndata <- dim(data)[2]
+len_series <- dim(data)[1]
+```
 
-
-# Apply lag to dataset to obtain array of input equences
-X <- array(NA, dim = c(length(data) - lag, lag, 1))
-len <- dim(X)[1]
-y <- array(NA, dim = c(len, 1))
-for(i in 1:len){
-  lag_selection <- i:(lag+i-1)
-  X[i,,] <- data[lag_selection]
-  y[i,]<- data[i+lag]
+Dataset normalization
+```{r}
+norm_series <- function(series){
+  m <- min(series)
+  d <- max(series)-m
+  return((series-m)/d)
 }
 
 
+for(col in 1:ndata){
+  data[,col] <- norm_series(data[,col])
+}
+
+t_series <- data[,1]
+```
 
 
+
+Creation of LSTM-ready datasets
+```{r}
+lag <- 50#round(dim(pol)[1]/2)
+
+# Apply lag to dataset to obtain array of input sequences
+X <- array(NA, dim = c((len_series - lag), lag, ndata))
+len <- dim(X)[1]
+y <- array(NA, dim = c(len, 1))
+
+for(i in 1:len){
+  lag_selection_1 <- i:(lag+i-1)
+  X[i,,1] <- t_series[lag_selection_1]
+  if(ndata > 1){
+    lag_selection_2 <- lag_selection_1 + 1
+    X[i,,2:ndata] <- data[lag_selection_2,2:ndata]
+  }
+  y[i,]<- t_series[i+lag]
+}
 
 
 # Split into training and test sets
@@ -175,12 +221,12 @@ plot((1+lag):(len+lag),y,
         type='l',
       lty=5,
         xlab = 'Day of the year',
-        ylab = 'Concentration of PM2.5',
+        ylab = 'Concentration of PM2.5 (normalized)',
         xlim = c(1,365),
       lwd =1
      )
 for(id in c(1, 100)){
-  lines(id:(lag+id-1),X[id,,],
+  lines(id:(lag+id-1),t_series[id:(lag+id-1)],
       col = 'black',lwd = 1)
 points((id+lag),y[id],
        col = 'red',
@@ -190,7 +236,7 @@ points((id+lag),y[id],
 
 
 # Legend
-legend("topright", legend = c("X[*,,]",'y','y[*]'), col = c("black", "gray",'red'), lty = 1, lwd = 2)
+legend("topright", legend = c("X[*,,1]",'y','y[*]'), col = c("black", "gray",'red'), lty = 1, lwd = 2)
 ```
 
 
@@ -201,13 +247,13 @@ legend("topright", legend = c("X[*,,]",'y','y[*]'), col = c("black", "gray",'red
 ```{r}
 model <- 0
 model <- keras_model_sequential() %>%
-  layer_lstm(units = lag, activation = 'relu', input_shape = c(lag, 1)) %>%
+  layer_lstm(units = lag, activation = 'relu', input_shape = c(lag, ndata)) %>%
   layer_dense(units = 1)
 
 #Set parameters
 model %>% compile(
   loss = 'mean_squared_error',
-  optimizer = optimizer_adam(learning_rate = 1e-3),
+  optimizer = optimizer_adam(learning_rate = 1e-4),
   metrics = c('mae')
 )
 
@@ -228,18 +274,25 @@ history <- model %>% fit(
 )
 ```
 
-## Predict 
+## Predict and bumb-up
 
 ```{r}
 predictions <- model %>% predict(X_test)
+
+
+bump_up <- function(series,ref_series){
+  s <- min(ref_series)
+  d <- max(ref_series)-s
+  return(series*d + s)
+}
 
 # Plot the results
 
 title = paste0("Actual vs Predicted for fixed window of ",lag,' days')
 
-plot((train_size + lag + 1):365, y_test, type = 'l', col = 'blue', lwd = 2,
+plot((train_size + lag + 1):365, bump_up(y_test,pol$PM2.5), type = 'l', col = 'blue', lwd = 2,
      main = title, xlab = "Day of the year", ylab = "PM2.5 concentration")
-lines((train_size + lag + 1):365, predictions, col = 'red', lwd = 2)
+lines((train_size + lag + 1):365, bump_up(predictions,pol$PM2.5), col = 'red', lwd = 2)
 
 
 legend("topright", legend = c("Actual", "Predicted"), col = c("blue", "red"), lty = 1, lwd = 2)
