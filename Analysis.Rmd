@@ -19,7 +19,7 @@ This project aims to adapt the LSTM framework to the modellinf of pollutants in 
 library(keras3) 
 ```
 
-#Data processing
+## Data Inspection and Processing
 
 Retrieve datasets
 
@@ -67,7 +67,6 @@ for(file in file_names){
   df$station_id <- id
   pollution_data[[id]] <- df
 }
-pollution_data
 ```
 
 
@@ -93,29 +92,30 @@ Selecting a station dataset to work individually and inspect missing values
 id <- '12040010'
 pol <- pollution_data[[id]]
 
+change_type <- function(series){
+  r <- series
+  lapply(r,function(x){
+      gsub(x,pattern = ',',replacement = '.')
+    }) |> unlist() |> as.numeric() -> r
+  return(r)
+}
 
-# Change datatype to numeric
-pol$PM2.5 |> as.numeric() -> pol$PM2.5
-pol$H.Rel. |> as.integer() -> pol$H.Rel.
-pol$R.Sol. |> as.integer() -> pol$R.Sol.
-pol$Veloc. |> lapply(function(x){
-  gsub(x,pattern = ',',replacement = '.')
+vars <- c('PM2.5','H.Rel.','R.Sol.','Veloc.','Temp.','Direc.')
+for(var in vars){
+  change_type(pol[[var]]) -> pol[[var]]
+}
 
-}) |> unlist() |> as.numeric() -> pol$Veloc.
-pol$Temp. |> lapply(function(x){
-  gsub(x,pattern = ',',replacement = '.')
-
-}) |> unlist() |> as.numeric() -> pol$Temp.
-
-pol
+head(pol[vars])
 ```
+
 Filling missing values
 
 ```{r}
 plot(1:365,pol$PM2.5,
      type = 'l',
      col = 'blue',
-     main = 'Plot with possible missing values'
+     main = 'Series with gaps',
+     ylab = 'PM 2.5 concentration'
      )
 ```
 
@@ -123,26 +123,46 @@ plot(1:365,pol$PM2.5,
 
 ```{r}
 # Function to replace missing values with mean of remaining values
-mean_replace <- function(arg){
-  l <- arg
-  l[!is.na(l)]|> mean() |> round(2) -> m
-  j <- 0
-  for(i in 1:length(l)){
-    if(is.na(l[[i]])){
-      j <- j+1
-      l[[i]] <- m
+mean_replace <- function(arg){#requires a numeric vector as argument
+  vec <- arg
+  
+  # Compute mean value for the present values
+  vec[!is.na(vec)]|> mean() |> round(2) -> m
+  
+  # Do replacement
+  replacement_counter <- 0
+  replaced_values <- rep(NA,length(vec)) # vector catching just replaced values
+  for(i in 1:length(vec)){
+    if(is.na(vec[[i]])){
+      replacement_counter <- replacement_counter + 1
+      vec[[i]] <- m
+      replaced_values[[i]] <- m
     }
   }
-  print(paste0('Percentage of missing values replaced with mean values for series: ',round(j/length(l),2),'%'))
-  return(l)
+  print(paste0('Percentage of missing values replaced with mean values for series: ',round(replacement_counter/length(vec),2),'%'))
+  return(list(new_series = vec,replaced_series = replaced_values))
 }
 
+apply_replacement_to_df <- function(df,col_names_vector){
+  new_df <- df
+  replacement_df <- df[col_names_vector]
+  for(name in col_names_vector){
+    ret <- mean_replace(new_df[[name]])
+    new_df[[name]] <- ret$new_series
+    replacement_df [[name]] <- ret$replaced_series
+  }
+  return(list(completed_df=new_df,replacement_df=replacement_df))
+}
 
-mean_replace(pol$PM2.5) -> pol$PM2.5
-mean_replace(pol$Temp.) -> pol$Temp.
-mean_replace(pol$R.Sol.) -> pol$R.Sol.
-mean_replace(pol$H.Rel.) -> pol$H.Rel.
-mean_replace(pol$Veloc.) -> pol$Veloc.
+```
+
+
+Applicaiton of missing values filling
+
+```{r}
+pol_complete <- apply_replacement_to_df(pol,vars)
+pol_complete$completed_df |> head()
+pol <- pol_complete$completed_df
 ```
 
 
@@ -153,6 +173,12 @@ plot(1:365,pol$PM2.5,
      type = 'l',
      col = 'blue'
      )
+lines(1:365,pol_complete$replacement_df$PM2.5,
+       col = 'red',
+       lwd = 2)
+
+# Legend
+legend("topright", legend = c('completed series','replaced values'), col = c('blue','red'), lty = 1, lwd = 2)
 ```
 
 
@@ -160,7 +186,7 @@ Preparing dataset for LSTM
 
 ```{r}
 # Data selection
-cols_selected <- c('PM2.5','Temp.','R.Sol.','H.Rel.','Veloc.')
+cols_selected <- vars
 data <- pol[cols_selected] |> data.matrix() |> unname()
 ndata <- dim(data)[2]
 len_series <- dim(data)[1]
@@ -270,9 +296,11 @@ history <- model %>% fit(
   epochs = 10,
   batch_size = 1,
   validation_data = list(X_test, y_test),
-  verbose = 2
+  verbose = 1
 )
 ```
+
+
 
 ## Predict and bumb-up
 
