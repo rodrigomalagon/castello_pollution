@@ -2,7 +2,7 @@
 title: "Analysis"
 author: "Rodrigo Malagón"
 date: "2024-08-29"
-output: html_document
+output: github_document
 ---
 
 ```{r setup, include=FALSE}
@@ -296,7 +296,7 @@ history <- model %>% fit(
   epochs = 10,
   batch_size = 1,
   validation_data = list(X_test, y_test),
-  verbose = 1
+  verbose = 2
 )
 ```
 
