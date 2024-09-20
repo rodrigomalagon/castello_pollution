@@ -11,8 +11,7 @@ knitr::opts_chunk$set(echo = TRUE)
 
 # Pollution concentration modelling in Castellón de la Plana for 2023 using LSTM
 
-
-This project aims to adapt the LSTM framework to the modellinf of pollutants in the city of Castellón de la Plana, which 
+This project aims to adapt the LSTM framework to the modellinf of pollutants in the city of Castellón de la Plana, which
 
 ```{r}
 #install.packages("keras3")
@@ -35,7 +34,6 @@ stations <- read.csv(paste0(data_path,'stations.csv'))
 stations
 ```
 
-
 Review length of datasets per station to have an initial idea of missing data across stations.
 
 ```{r}
@@ -56,7 +54,6 @@ df
 
 Create list with all pollution dataframes per station
 
-
 ```{r}
 pollution_data <- list()
 for(file in file_names){
@@ -68,9 +65,6 @@ for(file in file_names){
   pollution_data[[id]] <- df
 }
 ```
-
-
-
 
 Detecting the pollutants with greater representation across stations
 
@@ -84,7 +78,6 @@ for(pol in pollutants){
 num_stations|> unlist()-> num_stations
 data.frame(pollutants,num_stations)
 ```
-
 
 Selecting a station dataset to work individually and inspect missing values
 
@@ -128,10 +121,8 @@ plot(1:365,pol$PM2.5,
      )
 ```
 
-
-
 ```{r}
-# Function to replace missing values with mean of remaining values
+# Functions to replace missing values with mean of remaining values
 mean_replace <- function(arg){#requires a numeric vector as argument
   vec <- arg
   
@@ -165,7 +156,6 @@ apply_replacement_to_df <- function(df,col_names_vector){
 
 ```
 
-
 Application of missing values filling
 
 ```{r}
@@ -173,7 +163,6 @@ pol_complete <- apply_replacement_to_df(pol,vars)
 pol_complete$completed_df |> head()
 pol <- pol_complete$completed_df
 ```
-
 
 Plot time series with replaced values
 
@@ -190,18 +179,19 @@ lines(1:365,pol_complete$replacement_df$PM2.5,
 legend("topright", legend = c('completed series','replaced values'), col = c('blue','red'), lty = 1, lwd = 2)
 ```
 
+## LSTM processing
 
 Preparing dataset for LSTM
 
 ```{r}
 # Data selection
-cols_selected <- vars
-data <- pol[cols_selected] |> data.matrix() |> unname()
+data <- pol |> data.matrix() |> unname()
 ndata <- dim(data)[2]
 len_series <- dim(data)[1]
 ```
 
 Dataset normalization
+
 ```{r}
 # Min-max normalization
 min_max_norm <- function(series){
@@ -210,19 +200,24 @@ min_max_norm <- function(series){
   return((series-m)/d)
 }
 
-
+# Z_score normalization
+z_norm <- function(series){
+  m <- mean(series)
+  s <- sd(series)
+  r <- (series-m)/s
+  return(r)
+}
 
 
 for(col in 1:ndata){
-  data[,col] <- min_max_norm(data[,col])
+  data[,col] <- z_norm(data[,col])
 }
 
 t_series <- data[,1]
 ```
 
-
-
 Creation of LSTM-ready datasets
+
 ```{r}
 lag <- 50#round(dim(pol)[1]/2)
 
@@ -251,8 +246,8 @@ X_test <- X[(train_size + 1):len,,]
 y_test <- y[(train_size + 1):len,]
 ```
 
-
 A little of visualization of our datasets
+
 ```{r}
 plot((1+lag):(len+lag),y,
       col = 'grey',
@@ -277,10 +272,7 @@ points((id+lag),y[id],
 legend("topright", legend = c("X[*,,1]",'y','y[*]'), col = c("black", "gray",'red'), lty = 1, lwd = 2)
 ```
 
-
-
 #Data modelling
-
 
 ```{r}
 model <- 0
@@ -302,39 +294,74 @@ summary(model)
 ## Train model
 
 ```{r}
+set.seed(1000)
+
 history <- model %>% fit(
   x = X_train, 
   y = y_train,
-  epochs = 10,
+  epochs = 15,
   batch_size = 1,
   validation_data = list(X_test, y_test),
   verbose = 2
 )
 ```
 
+Save model
+```{r}
+#Sys.Date() |> as.character() -> date
+#metric <- 'mae'
+#(model_name <- paste0('lstm_model_',metric,'_',date,'.h5'))
+#(path <- paste0('./models/',model_name))
+#save_model(history,'./models/')
+```
 
 
 ## Predict and bumb-up
 
 ```{r}
-predictions <- model %>% predict(X_test)
+predictions <- model  %>% predict(X_test)
 
 
-bump_up <- function(series,ref_series){
+bump_up_min_max <- function(series,ref_series){
   s <- min(ref_series)
   d <- max(ref_series)-s
   return(series*d + s)
+}
+
+bump_up_z_score <- function(series,ref_series){
+  m <- mean(ref_series)
+  s <- sd(ref_series)
+  return(series*s + m)
 }
 
 # Plot the results
 
 title = paste0("Actual vs Predicted for fixed window of ",lag,' days')
 
-plot((train_size + lag + 1):365, bump_up(y_test,pol$PM2.5), type = 'l', col = 'blue', lwd = 2,
+plot((train_size + lag + 1):365, bump_up_z_score(y_test,pol$PM2.5), type = 'l', col = 'blue', lwd = 2,
      main = title, xlab = "Day of the year", ylab = "PM2.5 concentration")
-lines((train_size + lag + 1):365, bump_up(predictions,pol$PM2.5), col = 'red', lwd = 2)
+lines((train_size + lag + 1):365, bump_up_z_score(predictions,pol$PM2.5), col = 'red', lwd = 2)
 
 
 legend("topright", legend = c("Actual", "Predicted"), col = c("blue", "red"), lty = 1, lwd = 2)
 ```
+
+
+Residuals tests
+
+```{r}
+actual <- bump_up_z_score(y_test,pol$PM2.5)
+predicted <- bump_up_z_score(predictions,pol$PM2.5)
+residuals <- predicted-actual
+residuals |> hist(probability = TRUE,
+                  breaks = round(length(residuals)/5),
+                  col = 'azure2')
+lines(density(residuals),col = 'cyan4',lwd=2)
+```
+
+Shapiro-Wilk normality test
+```{r}
+shapiro.test(residuals)
+```
+
 
