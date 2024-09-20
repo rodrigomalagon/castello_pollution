@@ -72,7 +72,7 @@ for(file in file_names){
 
 
 
-Detecting pollutant with greater representation across stations
+Detecting the pollutants with greater representation across stations
 
 ```{r}
 pollutants <- c('PM10','PM2.5','NOx','NO2','SO2')
@@ -92,6 +92,7 @@ Selecting a station dataset to work individually and inspect missing values
 id <- '12040010'
 pol <- pollution_data[[id]]
 
+# Change data type of variables
 change_type <- function(series){
   r <- series
   lapply(r,function(x){
@@ -105,12 +106,20 @@ for(var in vars){
   change_type(pol[[var]]) -> pol[[var]]
 }
 
+#Selecting variables
+pol <- pol[vars]
 head(pol[vars])
+
+# save station dataset
+#dir <- './processed_data/'
+#data_file_path <- paste0(dir,'station_',id,'.rda')
+#save(pol,file = data_file_path)
 ```
 
 Filling missing values
 
 ```{r}
+load('./processed_data/station_12040010.rda')
 plot(1:365,pol$PM2.5,
      type = 'l',
      col = 'blue',
@@ -157,7 +166,7 @@ apply_replacement_to_df <- function(df,col_names_vector){
 ```
 
 
-Applicaiton of missing values filling
+Application of missing values filling
 
 ```{r}
 pol_complete <- apply_replacement_to_df(pol,vars)
@@ -194,15 +203,18 @@ len_series <- dim(data)[1]
 
 Dataset normalization
 ```{r}
-norm_series <- function(series){
+# Min-max normalization
+min_max_norm <- function(series){
   m <- min(series)
   d <- max(series)-m
   return((series-m)/d)
 }
 
 
+
+
 for(col in 1:ndata){
-  data[,col] <- norm_series(data[,col])
+  data[,col] <- min_max_norm(data[,col])
 }
 
 t_series <- data[,1]
