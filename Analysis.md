@@ -103,7 +103,7 @@ for(file in file_names){
 }
 ```
 
-Detecting pollutant with greater representation across stations
+Detecting the pollutants with greater representation across stations
 
 ``` r
 pollutants <- c('PM10','PM2.5','NOx','NO2','SO2')
@@ -130,6 +130,7 @@ values
 id <- '12040010'
 pol <- pollution_data[[id]]
 
+# Change data type of variables
 change_type <- function(series){
   r <- series
   lapply(r,function(x){
@@ -143,6 +144,8 @@ for(var in vars){
   change_type(pol[[var]]) -> pol[[var]]
 }
 
+#Selecting variables
+pol <- pol[vars]
 head(pol[vars])
 ```
 
@@ -154,9 +157,17 @@ head(pol[vars])
     ## 7    12     85    107    0.4  10.5    186
     ## 8    14     89    107    0.3   9.7    316
 
+``` r
+# save station dataset
+#dir <- './processed_data/'
+#data_file_path <- paste0(dir,'station_',id,'.rda')
+#save(pol,file = data_file_path)
+```
+
 Filling missing values
 
 ``` r
+load('./processed_data/station_12040010.rda')
 plot(1:365,pol$PM2.5,
      type = 'l',
      col = 'blue',
@@ -168,7 +179,7 @@ plot(1:365,pol$PM2.5,
 ![](Analysis_files/figure-gfm/unnamed-chunk-8-1.png)<!-- -->
 
 ``` r
-# Function to replace missing values with mean of remaining values
+# Functions to replace missing values with mean of remaining values
 mean_replace <- function(arg){#requires a numeric vector as argument
   vec <- arg
   
@@ -201,7 +212,7 @@ apply_replacement_to_df <- function(df,col_names_vector){
 }
 ```
 
-Applicaiton of missing values filling
+Application of missing values filling
 
 ``` r
 pol_complete <- apply_replacement_to_df(pol,vars)
@@ -218,20 +229,13 @@ pol_complete <- apply_replacement_to_df(pol,vars)
 pol_complete$completed_df |> head()
 ```
 
-    ##        FECHA PM2.5 Veloc. Direc. Temp. H.Rel. R.Sol. Precip. SO2 NO NO2 PM10
-    ## 3 01/01/2023    15    0.5    349  10.6     92     85       0   4  4   3   15
-    ## 4 02/01/2023    16    0.2    216  11.8     91     58       0   5 11   5   17
-    ## 5 03/01/2023    14    0.4    249  13.1     87     85       0   5 10   5   16
-    ## 6 04/01/2023     8    0.3    178  11.2     86    108       0   5  8   4   10
-    ## 7 05/01/2023    12    0.4    186  10.5     85    107     0,2   5          14
-    ## 8 06/01/2023    14    0.3    316   9.7     89    107       0   4          15
-    ##   NOx O3 station_id
-    ## 3   9 13   12040010
-    ## 4  22  9   12040010
-    ## 5  20 11   12040010
-    ## 6  16 12   12040010
-    ## 7     12   12040010
-    ## 8     15   12040010
+    ##   PM2.5 H.Rel. R.Sol. Veloc. Temp. Direc.
+    ## 3    15     92     85    0.5  10.6    349
+    ## 4    16     91     58    0.2  11.8    216
+    ## 5    14     87     85    0.4  13.1    249
+    ## 6     8     86    108    0.3  11.2    178
+    ## 7    12     85    107    0.4  10.5    186
+    ## 8    14     89    107    0.3   9.7    316
 
 ``` r
 pol <- pol_complete$completed_df
@@ -254,12 +258,13 @@ legend("topright", legend = c('completed series','replaced values'), col = c('bl
 
 ![](Analysis_files/figure-gfm/unnamed-chunk-11-1.png)<!-- -->
 
+## LSTM processing
+
 Preparing dataset for LSTM
 
 ``` r
 # Data selection
-cols_selected <- vars
-data <- pol[cols_selected] |> data.matrix() |> unname()
+data <- pol |> data.matrix() |> unname()
 ndata <- dim(data)[2]
 len_series <- dim(data)[1]
 ```
@@ -267,15 +272,24 @@ len_series <- dim(data)[1]
 Dataset normalization
 
 ``` r
-norm_series <- function(series){
+# Min-max normalization
+min_max_norm <- function(series){
   m <- min(series)
   d <- max(series)-m
   return((series-m)/d)
 }
 
+# Z_score normalization
+z_norm <- function(series){
+  m <- mean(series)
+  s <- sd(series)
+  r <- (series-m)/s
+  return(r)
+}
+
 
 for(col in 1:ndata){
-  data[,col] <- norm_series(data[,col])
+  data[,col] <- z_norm(data[,col])
 }
 
 t_series <- data[,1]
@@ -373,62 +387,116 @@ summary(model)
 ## Train model
 
 ``` r
+set.seed(1000)
+
 history <- model %>% fit(
   x = X_train, 
   y = y_train,
-  epochs = 10,
+  epochs = 15,
   batch_size = 1,
   validation_data = list(X_test, y_test),
   verbose = 2
 )
 ```
 
-    ## Epoch 1/10
-    ## 252/252 - 5s - 20ms/step - loss: 0.0394 - mae: 0.1392 - val_loss: 0.0199 - val_mae: 0.1176
-    ## Epoch 2/10
-    ## 252/252 - 3s - 11ms/step - loss: 0.0270 - mae: 0.1163 - val_loss: 0.0120 - val_mae: 0.0894
-    ## Epoch 3/10
-    ## 252/252 - 3s - 11ms/step - loss: 0.0230 - mae: 0.1049 - val_loss: 0.0085 - val_mae: 0.0752
-    ## Epoch 4/10
-    ## 252/252 - 3s - 10ms/step - loss: 0.0197 - mae: 0.0980 - val_loss: 0.0059 - val_mae: 0.0599
-    ## Epoch 5/10
-    ## 252/252 - 3s - 11ms/step - loss: 0.0172 - mae: 0.0925 - val_loss: 0.0050 - val_mae: 0.0530
-    ## Epoch 6/10
-    ## 252/252 - 3s - 12ms/step - loss: 0.0162 - mae: 0.0862 - val_loss: 0.0044 - val_mae: 0.0500
-    ## Epoch 7/10
-    ## 252/252 - 3s - 10ms/step - loss: 0.0147 - mae: 0.0836 - val_loss: 0.0040 - val_mae: 0.0504
-    ## Epoch 8/10
-    ## 252/252 - 3s - 11ms/step - loss: 0.0147 - mae: 0.0826 - val_loss: 0.0048 - val_mae: 0.0548
-    ## Epoch 9/10
-    ## 252/252 - 3s - 11ms/step - loss: 0.0137 - mae: 0.0809 - val_loss: 0.0056 - val_mae: 0.0619
-    ## Epoch 10/10
-    ## 252/252 - 3s - 11ms/step - loss: 0.0137 - mae: 0.0805 - val_loss: 0.0041 - val_mae: 0.0512
+    ## Epoch 1/15
+    ## 252/252 - 6s - 22ms/step - loss: 0.8726 - mae: 0.6352 - val_loss: 0.3515 - val_mae: 0.4915
+    ## Epoch 2/15
+    ## 252/252 - 3s - 10ms/step - loss: 0.7636 - mae: 0.6024 - val_loss: 0.2386 - val_mae: 0.3896
+    ## Epoch 3/15
+    ## 252/252 - 3s - 10ms/step - loss: 0.6635 - mae: 0.5511 - val_loss: 0.1788 - val_mae: 0.3214
+    ## Epoch 4/15
+    ## 252/252 - 3s - 10ms/step - loss: 0.5805 - mae: 0.5165 - val_loss: 0.1658 - val_mae: 0.3220
+    ## Epoch 5/15
+    ## 252/252 - 3s - 10ms/step - loss: 0.5254 - mae: 0.4905 - val_loss: 0.1721 - val_mae: 0.3368
+    ## Epoch 6/15
+    ## 252/252 - 3s - 10ms/step - loss: 0.4942 - mae: 0.4882 - val_loss: 0.1730 - val_mae: 0.3407
+    ## Epoch 7/15
+    ## 252/252 - 3s - 10ms/step - loss: 0.4666 - mae: 0.4656 - val_loss: 0.1925 - val_mae: 0.3578
+    ## Epoch 8/15
+    ## 252/252 - 3s - 10ms/step - loss: 0.4475 - mae: 0.4661 - val_loss: 0.1990 - val_mae: 0.3627
+    ## Epoch 9/15
+    ## 252/252 - 3s - 10ms/step - loss: 0.4432 - mae: 0.4513 - val_loss: 0.1924 - val_mae: 0.3514
+    ## Epoch 10/15
+    ## 252/252 - 3s - 10ms/step - loss: 0.4155 - mae: 0.4429 - val_loss: 0.2219 - val_mae: 0.3801
+    ## Epoch 11/15
+    ## 252/252 - 3s - 10ms/step - loss: 0.4038 - mae: 0.4336 - val_loss: 0.2539 - val_mae: 0.4098
+    ## Epoch 12/15
+    ## 252/252 - 3s - 11ms/step - loss: 0.3897 - mae: 0.4293 - val_loss: 0.3021 - val_mae: 0.4527
+    ## Epoch 13/15
+    ## 252/252 - 3s - 11ms/step - loss: 0.3878 - mae: 0.4275 - val_loss: 0.2527 - val_mae: 0.4103
+    ## Epoch 14/15
+    ## 252/252 - 3s - 10ms/step - loss: 0.3659 - mae: 0.4127 - val_loss: 0.1983 - val_mae: 0.3575
+    ## Epoch 15/15
+    ## 252/252 - 3s - 10ms/step - loss: 0.3641 - mae: 0.4152 - val_loss: 0.2154 - val_mae: 0.3751
+
+Save model
+
+``` r
+#Sys.Date() |> as.character() -> date
+#metric <- 'mae'
+#(model_name <- paste0('lstm_model_',metric,'_',date,'.h5'))
+#(path <- paste0('./models/',model_name))
+#save_model(history,'./models/')
+```
 
 ## Predict and bumb-up
 
 ``` r
-predictions <- model %>% predict(X_test)
+predictions <- model  %>% predict(X_test)
 ```
 
-    ## 2/2 - 0s - 203ms/step
+    ## 2/2 - 0s - 212ms/step
 
 ``` r
-bump_up <- function(series,ref_series){
+bump_up_min_max <- function(series,ref_series){
   s <- min(ref_series)
   d <- max(ref_series)-s
   return(series*d + s)
+}
+
+bump_up_z_score <- function(series,ref_series){
+  m <- mean(ref_series)
+  s <- sd(ref_series)
+  return(series*s + m)
 }
 
 # Plot the results
 
 title = paste0("Actual vs Predicted for fixed window of ",lag,' days')
 
-plot((train_size + lag + 1):365, bump_up(y_test,pol$PM2.5), type = 'l', col = 'blue', lwd = 2,
+plot((train_size + lag + 1):365, bump_up_z_score(y_test,pol$PM2.5), type = 'l', col = 'blue', lwd = 2,
      main = title, xlab = "Day of the year", ylab = "PM2.5 concentration")
-lines((train_size + lag + 1):365, bump_up(predictions,pol$PM2.5), col = 'red', lwd = 2)
+lines((train_size + lag + 1):365, bump_up_z_score(predictions,pol$PM2.5), col = 'red', lwd = 2)
 
 
 legend("topright", legend = c("Actual", "Predicted"), col = c("blue", "red"), lty = 1, lwd = 2)
 ```
 
-![](Analysis_files/figure-gfm/unnamed-chunk-18-1.png)<!-- -->
+![](Analysis_files/figure-gfm/unnamed-chunk-19-1.png)<!-- -->
+
+Residuals tests
+
+``` r
+actual <- bump_up_z_score(y_test,pol$PM2.5)
+predicted <- bump_up_z_score(predictions,pol$PM2.5)
+residuals <- predicted-actual
+residuals |> hist(probability = TRUE,
+                  breaks = round(length(residuals)/5),
+                  col = 'azure2')
+lines(density(residuals),col = 'cyan4',lwd=2)
+```
+
+![](Analysis_files/figure-gfm/unnamed-chunk-20-1.png)<!-- -->
+
+Shapiro-Wilk normality test
+
+``` r
+shapiro.test(residuals)
+```
+
+    ## 
+    ##  Shapiro-Wilk normality test
+    ## 
+    ## data:  residuals
+    ## W = 0.97361, p-value = 0.1936
