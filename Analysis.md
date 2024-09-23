@@ -298,22 +298,35 @@ t_series <- data[,1]
 Creation of LSTM-ready datasets
 
 ``` r
-lag <- 50#round(dim(pol)[1]/2)
+(1+3):(2+4)
+```
+
+    ## [1] 4 5 6
+
+``` r
+lag <- 20
+pred_window <- 5
 
 # Apply lag to dataset to obtain array of input sequences
-X <- array(NA, dim = c((len_series - lag), lag, ndata))
+X <- array(NA, dim = c(len_series - (lag + pred_window) + 1, lag, ndata))
 len <- dim(X)[1]
-y <- array(NA, dim = c(len, 1))
+
+y <- array(NA, dim = c(len, pred_window))
+
+
+
 
 for(i in 1:len){
-  lag_selection_1 <- i:(lag+i-1)
+  lag_selection_1 <- i:(i + (lag-1))
   X[i,,1] <- t_series[lag_selection_1]
   if(ndata > 1){
     lag_selection_2 <- lag_selection_1 + 1
     X[i,,2:ndata] <- data[lag_selection_2,2:ndata]
   }
-  y[i,]<- t_series[i+lag]
+  y_selection <- (i+lag):(i + lag + pred_window -1)
+  y[i,]<- t_series[y_selection]
 }
+
 
 
 # Split into training and test sets
@@ -328,19 +341,20 @@ y_test <- y[(train_size + 1):len,]
 A little of visualization of our datasets
 
 ``` r
-plot((1+lag):(len+lag),y,
+plot((1+lag):(len+lag),y[,1],
       col = 'grey',
         type='l',
       lty=5,
         xlab = 'Day of the year',
         ylab = 'Concentration of PM2.5 (normalized)',
         xlim = c(1,365),
-      lwd =1
+     lwd =1,
+     main='Data split for two samples at time indices t=1, 100'
      )
 for(id in c(1, 100)){
   lines(id:(lag+id-1),t_series[id:(lag+id-1)],
       col = 'black',lwd = 1)
-points((id+lag),y[id],
+points((id+lag),y[id,1],
        col = 'red',
        lwd = 2)
 }
@@ -351,7 +365,7 @@ points((id+lag),y[id],
 legend("topright", legend = c("X[*,,1]",'y','y[*]'), col = c("black", "gray",'red'), lty = 1, lwd = 2)
 ```
 
-![](Analysis_files/figure-gfm/unnamed-chunk-15-1.png)<!-- -->
+![](Analysis_files/figure-gfm/unnamed-chunk-16-1.png)<!-- -->
 
 \#Data modelling
 
@@ -359,7 +373,7 @@ legend("topright", legend = c("X[*,,1]",'y','y[*]'), col = c("black", "gray",'re
 model <- 0
 model <- keras_model_sequential() %>%
   layer_lstm(units = lag, activation = 'relu', input_shape = c(lag, ndata)) %>%
-  layer_dense(units = 1)
+  layer_dense(units = pred_window)
 
 #Set parameters
 model %>% compile(
@@ -376,12 +390,12 @@ summary(model)
     ## ┌───────────────────────────────────┬──────────────────────────┬───────────────
     ## │ Layer (type)                      │ Output Shape             │       Param # 
     ## ├───────────────────────────────────┼──────────────────────────┼───────────────
-    ## │ lstm (LSTM)                       │ (None, 50)               │        11,400 
+    ## │ lstm (LSTM)                       │ (None, 20)               │         2,160 
     ## ├───────────────────────────────────┼──────────────────────────┼───────────────
-    ## │ dense (Dense)                     │ (None, 1)                │            51 
+    ## │ dense (Dense)                     │ (None, 5)                │           105 
     ## └───────────────────────────────────┴──────────────────────────┴───────────────
-    ##  Total params: 11,451 (44.73 KB)
-    ##  Trainable params: 11,451 (44.73 KB)
+    ##  Total params: 2,265 (8.85 KB)
+    ##  Trainable params: 2,265 (8.85 KB)
     ##  Non-trainable params: 0 (0.00 B)
 
 ## Train model
@@ -400,35 +414,35 @@ history <- model %>% fit(
 ```
 
     ## Epoch 1/15
-    ## 252/252 - 6s - 22ms/step - loss: 0.8726 - mae: 0.6352 - val_loss: 0.3515 - val_mae: 0.4915
+    ## 273/273 - 4s - 13ms/step - loss: 1.0349 - mae: 0.7341 - val_loss: 0.7365 - val_mae: 0.7193
     ## Epoch 2/15
-    ## 252/252 - 3s - 10ms/step - loss: 0.7636 - mae: 0.6024 - val_loss: 0.2386 - val_mae: 0.3896
+    ## 273/273 - 1s - 5ms/step - loss: 0.9856 - mae: 0.7166 - val_loss: 0.7040 - val_mae: 0.7089
     ## Epoch 3/15
-    ## 252/252 - 3s - 10ms/step - loss: 0.6635 - mae: 0.5511 - val_loss: 0.1788 - val_mae: 0.3214
+    ## 273/273 - 1s - 5ms/step - loss: 0.9525 - mae: 0.7061 - val_loss: 0.6842 - val_mae: 0.7034
     ## Epoch 4/15
-    ## 252/252 - 3s - 10ms/step - loss: 0.5805 - mae: 0.5165 - val_loss: 0.1658 - val_mae: 0.3220
+    ## 273/273 - 1s - 5ms/step - loss: 0.9277 - mae: 0.6963 - val_loss: 0.6715 - val_mae: 0.7002
     ## Epoch 5/15
-    ## 252/252 - 3s - 10ms/step - loss: 0.5254 - mae: 0.4905 - val_loss: 0.1721 - val_mae: 0.3368
+    ## 273/273 - 2s - 6ms/step - loss: 0.9074 - mae: 0.6916 - val_loss: 0.6595 - val_mae: 0.6961
     ## Epoch 6/15
-    ## 252/252 - 3s - 10ms/step - loss: 0.4942 - mae: 0.4882 - val_loss: 0.1730 - val_mae: 0.3407
+    ## 273/273 - 1s - 5ms/step - loss: 0.8897 - mae: 0.6859 - val_loss: 0.6548 - val_mae: 0.6954
     ## Epoch 7/15
-    ## 252/252 - 3s - 10ms/step - loss: 0.4666 - mae: 0.4656 - val_loss: 0.1925 - val_mae: 0.3578
+    ## 273/273 - 2s - 6ms/step - loss: 0.8749 - mae: 0.6795 - val_loss: 0.6504 - val_mae: 0.6942
     ## Epoch 8/15
-    ## 252/252 - 3s - 10ms/step - loss: 0.4475 - mae: 0.4661 - val_loss: 0.1990 - val_mae: 0.3627
+    ## 273/273 - 1s - 5ms/step - loss: 0.8616 - mae: 0.6745 - val_loss: 0.6444 - val_mae: 0.6913
     ## Epoch 9/15
-    ## 252/252 - 3s - 10ms/step - loss: 0.4432 - mae: 0.4513 - val_loss: 0.1924 - val_mae: 0.3514
+    ## 273/273 - 1s - 5ms/step - loss: 0.8501 - mae: 0.6696 - val_loss: 0.6339 - val_mae: 0.6853
     ## Epoch 10/15
-    ## 252/252 - 3s - 10ms/step - loss: 0.4155 - mae: 0.4429 - val_loss: 0.2219 - val_mae: 0.3801
+    ## 273/273 - 1s - 5ms/step - loss: 0.8373 - mae: 0.6637 - val_loss: 0.6203 - val_mae: 0.6768
     ## Epoch 11/15
-    ## 252/252 - 3s - 10ms/step - loss: 0.4038 - mae: 0.4336 - val_loss: 0.2539 - val_mae: 0.4098
+    ## 273/273 - 1s - 5ms/step - loss: 0.8259 - mae: 0.6582 - val_loss: 0.6082 - val_mae: 0.6685
     ## Epoch 12/15
-    ## 252/252 - 3s - 11ms/step - loss: 0.3897 - mae: 0.4293 - val_loss: 0.3021 - val_mae: 0.4527
+    ## 273/273 - 1s - 5ms/step - loss: 0.8146 - mae: 0.6513 - val_loss: 0.5845 - val_mae: 0.6524
     ## Epoch 13/15
-    ## 252/252 - 3s - 11ms/step - loss: 0.3878 - mae: 0.4275 - val_loss: 0.2527 - val_mae: 0.4103
+    ## 273/273 - 1s - 5ms/step - loss: 0.8029 - mae: 0.6439 - val_loss: 0.5666 - val_mae: 0.6402
     ## Epoch 14/15
-    ## 252/252 - 3s - 10ms/step - loss: 0.3659 - mae: 0.4127 - val_loss: 0.1983 - val_mae: 0.3575
+    ## 273/273 - 2s - 6ms/step - loss: 0.7930 - mae: 0.6393 - val_loss: 0.5544 - val_mae: 0.6304
     ## Epoch 15/15
-    ## 252/252 - 3s - 10ms/step - loss: 0.3641 - mae: 0.4152 - val_loss: 0.2154 - val_mae: 0.3751
+    ## 273/273 - 2s - 6ms/step - loss: 0.7818 - mae: 0.6326 - val_loss: 0.5378 - val_mae: 0.6175
 
 Save model
 
@@ -437,18 +451,33 @@ Save model
 #metric <- 'mae'
 #(model_name <- paste0('lstm_model_',metric,'_',date,'.h5'))
 #(path <- paste0('./models/',model_name))
-#save_model(history,'./models/')
+#save_model(history,filepath = path)
 ```
 
 ## Predict and bumb-up
+
+Predict
 
 ``` r
 predictions <- model  %>% predict(X_test)
 ```
 
-    ## 2/2 - 0s - 212ms/step
+    ## 3/3 - 0s - 147ms/step
 
 ``` r
+head(predictions)
+```
+
+    ##            [,1]        [,2]        [,3]       [,4]       [,5]
+    ## [1,] -0.4371959 -0.08567076 -0.01533548 -0.4753624 -0.2361777
+    ## [2,] -0.3307241  0.04991169  0.02967308 -0.3345584 -0.2288724
+    ## [3,] -0.3157694  0.01851669 -0.02892204 -0.3467598 -0.2001419
+    ## [4,] -0.4426188 -0.04537940 -0.03427986 -0.5033131 -0.2465491
+    ## [5,] -0.5035896 -0.08797872 -0.05831627 -0.5662537 -0.2701602
+    ## [6,] -0.5499266 -0.09922181 -0.09417582 -0.6053547 -0.2690040
+
+``` r
+# Bump-up definition to retrieve original data ranges
 bump_up_min_max <- function(series,ref_series){
   s <- min(ref_series)
   d <- max(ref_series)-s
@@ -460,26 +489,42 @@ bump_up_z_score <- function(series,ref_series){
   s <- sd(ref_series)
   return(series*s + m)
 }
+```
 
+### One-day-ahead prediction
+
+Plot one-day-ahead predictions
+
+``` r
 # Plot the results
+actual <- bump_up_z_score(y_test[,1],pol$PM2.5)
+predicted <- bump_up_z_score(predictions[,1],pol$PM2.5)  
 
-title = paste0("Actual vs Predicted for fixed window of ",lag,' days')
 
-plot((train_size + lag + 1):365, bump_up_z_score(y_test,pol$PM2.5), type = 'l', col = 'blue', lwd = 2,
-     main = title, xlab = "Day of the year", ylab = "PM2.5 concentration")
-lines((train_size + lag + 1):365, bump_up_z_score(predictions,pol$PM2.5), col = 'red', lwd = 2)
+title = paste0("One-day ahead predictions (fixed lag window of ",lag,' days)')
+
+plot(x = (train_size + lag + 1):(365 - pred_window + 1),
+     y = actual,
+     type = 'l',
+     col = 'blue',
+     lwd = 2,
+     main = title,
+     xlab = "Day of the year",
+     ylab = "PM2.5 concentration")
+lines(x = (train_size + lag + 1):(365 - pred_window + 1),
+      y = predicted,
+      col = 'red',
+      lwd = 2)
 
 
 legend("topright", legend = c("Actual", "Predicted"), col = c("blue", "red"), lty = 1, lwd = 2)
 ```
 
-![](Analysis_files/figure-gfm/unnamed-chunk-19-1.png)<!-- -->
+![](Analysis_files/figure-gfm/unnamed-chunk-22-1.png)<!-- -->
 
-Residuals tests
+One-day-ahead residuals tests
 
 ``` r
-actual <- bump_up_z_score(y_test,pol$PM2.5)
-predicted <- bump_up_z_score(predictions,pol$PM2.5)
 residuals <- predicted-actual
 residuals |> hist(probability = TRUE,
                   breaks = round(length(residuals)/5),
@@ -487,7 +532,7 @@ residuals |> hist(probability = TRUE,
 lines(density(residuals),col = 'cyan4',lwd=2)
 ```
 
-![](Analysis_files/figure-gfm/unnamed-chunk-20-1.png)<!-- -->
+![](Analysis_files/figure-gfm/unnamed-chunk-23-1.png)<!-- -->
 
 Shapiro-Wilk normality test
 
@@ -499,4 +544,6 @@ shapiro.test(residuals)
     ##  Shapiro-Wilk normality test
     ## 
     ## data:  residuals
-    ## W = 0.97361, p-value = 0.1936
+    ## W = 0.9871, p-value = 0.7092
+
+### Present prediction using full time window

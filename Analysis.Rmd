@@ -219,22 +219,34 @@ t_series <- data[,1]
 Creation of LSTM-ready datasets
 
 ```{r}
-lag <- 50#round(dim(pol)[1]/2)
+(1+3):(2+4)
+```
+
+
+```{r}
+lag <- 20
+pred_window <- 5
 
 # Apply lag to dataset to obtain array of input sequences
-X <- array(NA, dim = c((len_series - lag), lag, ndata))
+X <- array(NA, dim = c(len_series - (lag + pred_window) + 1, lag, ndata))
 len <- dim(X)[1]
-y <- array(NA, dim = c(len, 1))
+
+y <- array(NA, dim = c(len, pred_window))
+
+
+
 
 for(i in 1:len){
-  lag_selection_1 <- i:(lag+i-1)
+  lag_selection_1 <- i:(i + (lag-1))
   X[i,,1] <- t_series[lag_selection_1]
   if(ndata > 1){
     lag_selection_2 <- lag_selection_1 + 1
     X[i,,2:ndata] <- data[lag_selection_2,2:ndata]
   }
-  y[i,]<- t_series[i+lag]
+  y_selection <- (i+lag):(i + lag + pred_window -1)
+  y[i,]<- t_series[y_selection]
 }
+
 
 
 # Split into training and test sets
@@ -249,19 +261,20 @@ y_test <- y[(train_size + 1):len,]
 A little of visualization of our datasets
 
 ```{r}
-plot((1+lag):(len+lag),y,
+plot((1+lag):(len+lag),y[,1],
       col = 'grey',
         type='l',
       lty=5,
         xlab = 'Day of the year',
         ylab = 'Concentration of PM2.5 (normalized)',
         xlim = c(1,365),
-      lwd =1
+     lwd =1,
+     main='Data split for two samples at time indices t=1, 100'
      )
 for(id in c(1, 100)){
   lines(id:(lag+id-1),t_series[id:(lag+id-1)],
       col = 'black',lwd = 1)
-points((id+lag),y[id],
+points((id+lag),y[id,1],
        col = 'red',
        lwd = 2)
 }
@@ -278,7 +291,7 @@ legend("topright", legend = c("X[*,,1]",'y','y[*]'), col = c("black", "gray",'re
 model <- 0
 model <- keras_model_sequential() %>%
   layer_lstm(units = lag, activation = 'relu', input_shape = c(lag, ndata)) %>%
-  layer_dense(units = 1)
+  layer_dense(units = pred_window)
 
 #Set parameters
 model %>% compile(
@@ -312,16 +325,20 @@ Save model
 #metric <- 'mae'
 #(model_name <- paste0('lstm_model_',metric,'_',date,'.h5'))
 #(path <- paste0('./models/',model_name))
-#save_model(history,'./models/')
+#save_model(history,filepath = path)
 ```
 
 
 ## Predict and bumb-up
 
+Predict
 ```{r}
 predictions <- model  %>% predict(X_test)
+head(predictions)
+```
 
-
+```{r}
+# Bump-up definition to retrieve original data ranges
 bump_up_min_max <- function(series,ref_series){
   s <- min(ref_series)
   d <- max(ref_series)-s
@@ -333,25 +350,43 @@ bump_up_z_score <- function(series,ref_series){
   s <- sd(ref_series)
   return(series*s + m)
 }
+```
 
+
+### One-day-ahead prediction
+
+
+Plot one-day-ahead predictions
+
+```{r}
 # Plot the results
+actual <- bump_up_z_score(y_test[,1],pol$PM2.5)
+predicted <- bump_up_z_score(predictions[,1],pol$PM2.5)  
 
-title = paste0("Actual vs Predicted for fixed window of ",lag,' days')
 
-plot((train_size + lag + 1):365, bump_up_z_score(y_test,pol$PM2.5), type = 'l', col = 'blue', lwd = 2,
-     main = title, xlab = "Day of the year", ylab = "PM2.5 concentration")
-lines((train_size + lag + 1):365, bump_up_z_score(predictions,pol$PM2.5), col = 'red', lwd = 2)
+title = paste0("One-day ahead predictions (fixed lag window of ",lag,' days)')
+
+plot(x = (train_size + lag + 1):(365 - pred_window + 1),
+     y = actual,
+     type = 'l',
+     col = 'blue',
+     lwd = 2,
+     main = title,
+     xlab = "Day of the year",
+     ylab = "PM2.5 concentration")
+lines(x = (train_size + lag + 1):(365 - pred_window + 1),
+      y = predicted,
+      col = 'red',
+      lwd = 2)
 
 
 legend("topright", legend = c("Actual", "Predicted"), col = c("blue", "red"), lty = 1, lwd = 2)
 ```
 
 
-Residuals tests
+One-day-ahead residuals tests
 
 ```{r}
-actual <- bump_up_z_score(y_test,pol$PM2.5)
-predicted <- bump_up_z_score(predictions,pol$PM2.5)
 residuals <- predicted-actual
 residuals |> hist(probability = TRUE,
                   breaks = round(length(residuals)/5),
@@ -365,3 +400,4 @@ shapiro.test(residuals)
 ```
 
 
+### Present prediction using full time window
