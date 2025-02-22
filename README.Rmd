@@ -20,4 +20,4 @@ The goal of `Castelló pollution` is to showcase a basic processing and analysis
 
 Particularly, a mean-value filling of missing value was performed for a single pollution sensor through time and an Long Short-Term Memory Model was run for this particular time series. The project scope is year 2023.
 
-The workflow is available at the `Analysis.md` document in this repository.
+The workflow is available at the [`Analysis.md`](Analysis.md) document in this repository.
