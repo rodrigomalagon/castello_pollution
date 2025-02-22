@@ -14,8 +14,12 @@ knitr::opts_chunk$set(echo = TRUE)
 This project aims to adapt the LSTM framework to the modellinf of pollutants in the city of Castellón de la Plana, which
 
 ```{r}
-#install.packages("keras3")
+# Load libraries
+# install.packages('keras3')
 library(keras3) 
+
+# Load helping functions
+source('functions.R')
 ```
 
 ## Data Inspection and Processing
@@ -121,47 +125,13 @@ plot(1:365,pol$PM2.5,
      )
 ```
 
-```{r}
-# Functions to replace missing values with mean of remaining values
-mean_replace <- function(arg){#requires a numeric vector as argument
-  vec <- arg
-  
-  # Compute mean value for the present values
-  vec[!is.na(vec)]|> mean() |> round(2) -> m
-  
-  # Do replacement
-  replacement_counter <- 0
-  replaced_values <- rep(NA,length(vec)) # vector catching just replaced values
-  for(i in 1:length(vec)){
-    if(is.na(vec[[i]])){
-      replacement_counter <- replacement_counter + 1
-      vec[[i]] <- m
-      replaced_values[[i]] <- m
-    }
-  }
-  print(paste0('Percentage of missing values replaced with mean values for series: ',round(replacement_counter/length(vec),2),'%'))
-  return(list(new_series = vec,replaced_series = replaced_values))
-}
-
-apply_replacement_to_df <- function(df,col_names_vector){
-  new_df <- df
-  replacement_df <- df[col_names_vector]
-  for(name in col_names_vector){
-    ret <- mean_replace(new_df[[name]])
-    new_df[[name]] <- ret$new_series
-    replacement_df [[name]] <- ret$replaced_series
-  }
-  return(list(completed_df=new_df,replacement_df=replacement_df))
-}
-
-```
 
 Application of missing values filling
 
 ```{r}
 pol_complete <- apply_replacement_to_df(pol,vars)
-pol_complete$completed_df |> head()
 pol <- pol_complete$completed_df
+head(pol)
 ```
 
 Plot time series with replaced values
@@ -190,37 +160,23 @@ ndata <- dim(data)[2]
 len_series <- dim(data)[1]
 ```
 
-Dataset normalization
+Select dependent variable and normalize data
 
 ```{r}
-# Min-max normalization
-min_max_norm <- function(series){
-  m <- min(series)
-  d <- max(series)-m
-  return((series-m)/d)
-}
+# Select dependent var
+t_series <- data[,1]
 
-# Z_score normalization
-z_norm <- function(series){
-  m <- mean(series)
-  s <- sd(series)
-  r <- (series-m)/s
-  return(r)
-}
-
-
+# Normalisation
 for(col in 1:ndata){
   data[,col] <- z_norm(data[,col])
 }
-
-t_series <- data[,1]
 ```
 
 Creation of LSTM-ready datasets
 
 ```{r}
 lag <- 20
-pred_window <- 5
+pred_window <- 1
 
 # Apply lag to dataset to obtain array of input sequences
 X <- array(NA, dim = c(len_series - (lag + pred_window) + 1, lag, ndata))
@@ -229,8 +185,7 @@ len <- dim(X)[1]
 y <- array(NA, dim = c(len, pred_window))
 
 
-
-
+# Construct tensor
 for(i in 1:len){
   lag_selection_1 <- i:(i + (lag-1))
   X[i,,1] <- t_series[lag_selection_1]
@@ -241,9 +196,10 @@ for(i in 1:len){
   y_selection <- (i+lag):(i + lag + pred_window -1)
   y[i,]<- t_series[y_selection]
 }
+```
 
-
-
+Split data
+```{r}
 # Split into training and test sets
 train_size <- round(len * 0.8)
 X_train <- X[1:train_size,,]
@@ -283,13 +239,32 @@ legend("topright", legend = c("X[*,,1]",'y','y[*]'), col = c("black", "gray",'re
 #Data modelling
 
 ```{r}
-model <- 0
-model <- keras_model_sequential() %>%
-  layer_lstm(units = lag, activation = 'relu', input_shape = c(lag, ndata)) %>%
-  layer_dense(units = pred_window)
+model <- NULL
+model <- keras_model_sequential() |>
+    layer_lstm(units = 64,input_shape = c(lag,ndata),
+               activation = 'relu',
+               recurrent_activation='sigmoid',
+               #bias_regularizer = regularizer_l2(0.0001), # add L2 regularization to bias terms
+               return_sequences = TRUE) |>
+    layer_lstm(units = 32, 
+               activation = 'relu',
+               recurrent_activation='sigmoid',
+               return_sequences = TRUE) |>
+    layer_lstm(units = 16, 
+               activation = 'relu',
+               recurrent_activation='sigmoid',
+               return_sequences = FALSE) |>
+    #layer_lstm(units = 8, 
+    #           activation = 'relu',
+    #           recurrent_activation='sigmoid',
+    #           return_sequences = FALSE) |>
+    layer_dense(units = pred_window)
+```
 
+
+```{r}
 #Set parameters
-model %>% compile(
+model |> compile(
   loss = 'mean_squared_error',
   optimizer = optimizer_adam(learning_rate = 1e-4),
   metrics = c('mae')
